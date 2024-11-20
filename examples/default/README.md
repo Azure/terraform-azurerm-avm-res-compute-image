@@ -1,19 +1,23 @@
 <!-- BEGIN_TF_DOCS -->
-# Default example
+# Create a virtual machine image from an existing virtual machine
 
-This deploys the module in its simplest form.
+This example demonstrates how to prepare both Windows and Linux virtual machines as base configurations for creating a managed image. The process involves deprovisioning or generalizing the VM to remove any machine-specific data, ensuring the virtual machine is in a clean, reusable state before capturing it as an image.
+
+For the Linux VM, the Azure VM Agent (waagent) is used to deprovision the machine, removing all machine-specific files and sensitive data to ensure it is generalized for use as a base image. The Windows VM undergoes a similar process, with Sysprep being run to remove all personal accounts, security settings, and unique identifiers, followed by deallocation and generalization.
+
+Both VMs will be deallocated and generalized to create a clean image that can be used to provision additional VMs. After generalizing, the VMs will serve as the source for generating a managed image in Azure.
 
 ```hcl
 terraform {
-  required_version = "~> 1.5"
+  required_version = "~> 1.9"
   required_providers {
+    azapi = {
+      source  = "azure/azapi"
+      version = ">= 2.00, < 3"
+    }
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 3.74"
-    }
-    modtm = {
-      source  = "azure/modtm"
-      version = "~> 0.3"
+      version = ">= 3.116.0"
     }
     random = {
       source  = "hashicorp/random"
@@ -23,49 +27,189 @@ terraform {
 }
 
 provider "azurerm" {
-  features {}
+  features {
+    resource_group {
+      prevent_deletion_if_contains_resources = false
+    }
+  }
 }
 
+## Custom Initialization Scripts
+# The Azure VM Agent (waagent) is utilized to deprovision the Linux virtual machine and remove machine-specific files and sensitive data
+# Sysprep is executed to remove all personal accounts, security settings, and unique identifiers from the Windows virtual machine
+locals {
+  linux   = <<CUSTOM_DATA
+  #!/bin/bash
+  sudo waagent -deprovision+user
+  CUSTOM_DATA
+  windows = <<CUSTOM_DATA
+  cd $env:windir\\system32\\sysprep; rm -r -fo Panther; .\\sysprep.exe /generalize /shutdown /oobe
+  CUSTOM_DATA
+}
 
-## Section to provide a random Azure region for the resource group
-# This allows us to randomize the region for the resource group.
+resource "random_password" "this" {
+  length           = 16
+  min_lower        = 2
+  min_numeric      = 2
+  min_special      = 2
+  min_upper        = 2
+  override_special = "!#$%&()*+,-./:;<=>?@[]^_{|}~"
+  special          = true
+}
+
+resource "random_string" "this" {
+  length  = 16
+  special = false
+}
+
 module "regions" {
-  source  = "Azure/avm-utl-regions/azurerm"
-  version = "~> 0.1"
+  source  = "Azure/regions/azurerm"
+  version = "~> 0.3"
 }
 
-# This allows us to randomize the region for the resource group.
 resource "random_integer" "region_index" {
   max = length(module.regions.regions) - 1
   min = 0
 }
-## End of section to provide a random Azure region for the resource group
 
-# This ensures we have unique CAF compliant names for our resources.
 module "naming" {
   source  = "Azure/naming/azurerm"
   version = "~> 0.3"
 }
 
-# This is required for resource modules
 resource "azurerm_resource_group" "this" {
   location = module.regions.regions[random_integer.region_index.result].name
   name     = module.naming.resource_group.name_unique
 }
 
-# This is the module call
-# Do not specify location here due to the randomization above.
-# Leaving location as `null` will cause the module to use the resource group location
-# with a data source.
-module "test" {
-  source = "../../"
-  # source             = "Azure/avm-<res/ptn>-<name>/azurerm"
-  # ...
+resource "azurerm_virtual_network" "this" {
+  address_space       = ["10.0.0.0/22"]
   location            = azurerm_resource_group.this.location
-  name                = "TODO" # TODO update with module.naming.<RESOURCE_TYPE>.name_unique
+  name                = module.naming.virtual_network.name_unique
+  resource_group_name = azurerm_resource_group.this.name
+}
+
+resource "azurerm_subnet" "this" {
+  address_prefixes     = ["10.0.2.0/24"]
+  name                 = module.naming.subnet.name_unique
+  resource_group_name  = azurerm_resource_group.this.name
+  virtual_network_name = azurerm_virtual_network.this.name
+}
+
+resource "azurerm_network_interface" "this" {
+  location            = azurerm_resource_group.this.location
+  name                = module.naming.network_interface.name_unique
   resource_group_name = azurerm_resource_group.this.name
 
-  enable_telemetry = var.enable_telemetry # see variables.tf
+  ip_configuration {
+    name                          = "primary"
+    private_ip_address_allocation = "Dynamic"
+    subnet_id                     = azurerm_subnet.this.id
+  }
+}
+
+# Windows
+resource "azurerm_windows_virtual_machine" "this" {
+  admin_password = random_password.this.result
+  admin_username = random_string.this.result
+  location       = azurerm_resource_group.this.location
+  name           = "win-${module.naming.windows_virtual_machine.name_unique}"
+  network_interface_ids = [
+    azurerm_network_interface.this.id,
+  ]
+  resource_group_name = azurerm_resource_group.this.name
+  size                = "Standard_D4s_v3"
+  custom_data         = base64encode(local.windows)
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Premium_ZRS"
+    name                 = module.naming.managed_disk.name_unique
+  }
+  source_image_reference {
+    offer     = "WindowsServer"
+    publisher = "MicrosoftWindowsServer"
+    sku       = "2022-Datacenter"
+    version   = "latest"
+  }
+
+  lifecycle {
+    ignore_changes = all
+  }
+}
+
+resource "azapi_resource_action" "deallocate" {
+  resource_id = azurerm_windows_virtual_machine.this.id
+  type        = "Microsoft.Compute/virtualMachines@2024-07-01"
+  action      = "Deallocate"
+}
+
+resource "azapi_resource_action" "generalize" {
+  resource_id = azurerm_windows_virtual_machine.this.id
+  type        = "Microsoft.Compute/virtualMachines@2024-07-01"
+  action      = "Generalize"
+
+  depends_on = [azapi_resource_action.deallocate]
+}
+
+# Linux
+# resource "azurerm_linux_virtual_machine" "this" {
+#   name                            = "lin-${module.naming.windows_virtual_machine.name_unique}"
+#   resource_group_name             = azurerm_resource_group.this.name
+#   location                        = azurerm_resource_group.this.location
+#   size                            = "Standard_D2s_v3"
+#   custom_data                     = base64encode(local.linux)
+#   admin_username                  = random_string.this.result
+#   admin_password                  = random_password.this.result
+#   disable_password_authentication = false
+#   network_interface_ids = [
+#     azurerm_network_interface.this.id,
+#   ]
+
+#   source_image_reference {
+#     publisher = "Canonical"
+#     offer     = "0001-com-ubuntu-server-jammy"
+#     sku       = "22_04-lts"
+#     version   = "latest"
+#   }
+
+#   os_disk {
+#     name                 = module.naming.managed_disk.name_unique
+#     storage_account_type = "Standard_LRS"
+#     caching              = "ReadWrite"
+#   }
+
+#   lifecycle {
+#    ignore_changes = all
+#  }
+# }
+
+# This resource deallocates (stops and releases) the Linux virtual machine to prepare it for generalization
+# resource "azapi_resource_action" "deallocate" {
+#   type        = "Microsoft.Compute/virtualMachines@2024-07-01"
+#   resource_id = azurerm_linux_virtual_machine.this.id
+#   action      = "Deallocate"
+# }
+
+# This resource marks the Linuxvirtual machine as generalized
+# resource "azapi_resource_action" "generalize" {
+#   type        = "Microsoft.Compute/virtualMachines@2024-07-01"
+#   resource_id = azurerm_linux_virtual_machine.this.id
+#   action      = "Generalize"
+
+#   depends_on = [azapi_resource_action.deallocate]
+# }
+
+module "image" {
+  source                    = "../../"
+  location                  = azurerm_resource_group.this.location
+  name                      = module.naming.image.name_unique
+  resource_group_name       = azurerm_resource_group.this.name
+  hyperv_generation         = "V1"
+  source_virtual_machine_id = azurerm_windows_virtual_machine.this.id
+  enable_telemetry          = true
+
+  depends_on = [azapi_resource_action.generalize]
 }
 ```
 
@@ -74,11 +218,11 @@ module "test" {
 
 The following requirements are needed by this module:
 
-- <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) (~> 1.5)
+- <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) (~> 1.9)
 
-- <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) (~> 3.74)
+- <a name="requirement_azapi"></a> [azapi](#requirement\_azapi) (>= 2.00, < 3)
 
-- <a name="requirement_modtm"></a> [modtm](#requirement\_modtm) (~> 0.3)
+- <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) (>= 3.116.0)
 
 - <a name="requirement_random"></a> [random](#requirement\_random) (~> 3.5)
 
@@ -86,8 +230,16 @@ The following requirements are needed by this module:
 
 The following resources are used by this module:
 
+- [azapi_resource_action.deallocate](https://registry.terraform.io/providers/azure/azapi/latest/docs/resources/resource_action) (resource)
+- [azapi_resource_action.generalize](https://registry.terraform.io/providers/azure/azapi/latest/docs/resources/resource_action) (resource)
+- [azurerm_network_interface.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/network_interface) (resource)
 - [azurerm_resource_group.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/resource_group) (resource)
+- [azurerm_subnet.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/subnet) (resource)
+- [azurerm_virtual_network.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_network) (resource)
+- [azurerm_windows_virtual_machine.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/windows_virtual_machine) (resource)
 - [random_integer.region_index](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/integer) (resource)
+- [random_password.this](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) (resource)
+- [random_string.this](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/string) (resource)
 
 <!-- markdownlint-disable MD013 -->
 ## Required Inputs
@@ -96,17 +248,7 @@ No required inputs.
 
 ## Optional Inputs
 
-The following input variables are optional (have default values):
-
-### <a name="input_enable_telemetry"></a> [enable\_telemetry](#input\_enable\_telemetry)
-
-Description: This variable controls whether or not telemetry is enabled for the module.  
-For more information see <https://aka.ms/avm/telemetryinfo>.  
-If it is set to false, then no telemetry will be collected.
-
-Type: `bool`
-
-Default: `true`
+No optional inputs.
 
 ## Outputs
 
@@ -116,6 +258,12 @@ No outputs.
 
 The following Modules are called:
 
+### <a name="module_image"></a> [image](#module\_image)
+
+Source: ../../
+
+Version:
+
 ### <a name="module_naming"></a> [naming](#module\_naming)
 
 Source: Azure/naming/azurerm
@@ -124,15 +272,9 @@ Version: ~> 0.3
 
 ### <a name="module_regions"></a> [regions](#module\_regions)
 
-Source: Azure/avm-utl-regions/azurerm
+Source: Azure/regions/azurerm
 
-Version: ~> 0.1
-
-### <a name="module_test"></a> [test](#module\_test)
-
-Source: ../../
-
-Version:
+Version: ~> 0.3
 
 <!-- markdownlint-disable-next-line MD041 -->
 ## Data Collection
