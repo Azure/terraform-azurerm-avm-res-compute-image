@@ -34,14 +34,11 @@ provider "azurerm" {
   }
 }
 
-## Custom Initialization Scripts
-# The Azure VM Agent (waagent) is utilized to deprovision the Linux virtual machine and remove machine-specific files and sensitive data
-# Sysprep is executed to remove all personal accounts, security settings, and unique identifiers from the Windows virtual machine
 locals {
-  linux   = <<CUSTOM_DATA
-  #!/bin/bash
-  sudo waagent -deprovision+user
-  CUSTOM_DATA
+  # linux   = <<CUSTOM_DATA
+  # #!/bin/bash
+  # sudo waagent -deprovision+user
+  # CUSTOM_DATA
   windows = <<CUSTOM_DATA
   cd $env:windir\\system32\\sysprep; rm -r -fo Panther; .\\sysprep.exe /generalize /shutdown /oobe
   CUSTOM_DATA
