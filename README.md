@@ -1,23 +1,86 @@
 <!-- BEGIN_TF_DOCS -->
-# terraform-azurerm-avm-template
+# Azure Image Module
 
-This is a template repo for Terraform Azure Verified Modules.
+This module is used to create and manage managed images, excluding gallery images versions and definitions.
 
-Things to do:
+## Features
 
-1. Set up a GitHub repo environment called `test`.
-1. Configure environment protection rule to ensure that approval is required before deploying to this environment.
-1. Create a user-assigned managed identity in your test subscription.
-1. Create a role assignment for the managed identity on your test subscription, use the minimum required role.
-1. Configure federated identity credentials on the user assigned managed identity. Use the GitHub environment.
-1. Search and update TODOs within the code and remove the TODO comments once complete.
+The module includes the following functionalities:
 
-> [!IMPORTANT]
-> As the overall AVM framework is not GA (generally available) yet - the CI framework and test automation is not fully functional and implemented across all supported languages yet - breaking changes are expected, and additional customer feedback is yet to be gathered and incorporated. Hence, modules **MUST NOT** be published at version `1.0.0` or higher at this time.
->
-> All module **MUST** be published as a pre-release version (e.g., `0.1.0`, `0.1.1`, `0.2.0`, etc.) until the AVM framework becomes GA.
->
-> However, it is important to note that this **DOES NOT** mean that the modules cannot be consumed and utilized. They **CAN** be leveraged in all types of environments (dev, test, prod etc.). Consumers can treat them just like any other IaC module and raise issues or feature requests against them as they learn from the usage of the module. Consumers should also read the release notes for each version, if considering updating to a more recent version of a module to see if there are any considerations or breaking changes etc.
+- Creating a virtual machine image from a blob.
+- Creating a virtual machine image from a managed disk with DiskEncryptionSet resource.
+- Creating a virtual machine image from a managed disk.
+- Creating a virtual machine image from an existing virtual machine.
+- Creating a virtual machine image that includes a data disk from a blob.
+- Creating a virtual machine image that includes a data disk from a managed disk.
+
+## Usage
+
+To use this module in your Terraform configuration, you'll need to provide values for the required variables.
+
+### Example - Create a managed image from a blob
+
+This example demonstrates how to create an image from a VHD or blob.
+
+```terraform
+module "avm-res-compute-image" {
+  source = "Azure/avm-res-compute-image/azurerm"
+
+  resource_group_name = "myResourceGroup"
+  location            = "East US"
+  image_name          = "myImage"
+  hyperv_generation   = "V1"
+  enable_telemetry    = true
+
+  os_disk = {
+    blob_uri     = "https://myblobstorage.blob.core.windows.net/vhds/my-vhd.vhd"
+    caching      = "None"
+    size_gb      = 30
+    storage_type = "Standard_LRS"
+    os_type      = "Linux"
+  }
+}
+```
+
+### Example - Create a managed image from a virtual machine
+
+This example demonstrates how to create an image from a virtual machine.
+
+```terraform
+module "avm-res-compute-image" {
+  source = "Azure/avm-res-compute-image/azurerm"
+
+  resource_group_name       = "myResourceGroup"
+  location                  = "East US"
+  image_name                = "myImage"
+  hyperv_generation         = "V1"
+  enable_telemetry          = true
+  source_virtual_machine_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroup/providers/Microsoft.Compute/virtualMachines/myVM"
+}
+```
+
+### Example - Create a managed image from a managed disk
+
+This example demonstrates how to create an image from a managed disk.
+
+```terraform
+module "avm-res-compute-image" {
+  source = "Azure/avm-res-compute-image/azurerm"
+
+  resource_group_name = "myResourceGroup"
+  location            = "East US"
+  image_name          = "myImage"
+  hyperv_generation   = "V1"
+  enable_telemetry    = true
+
+  os_disk = {
+    id      = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroup/providers/Microsoft.Compute/disks/myDisk"
+    caching = "None"
+    size_gb = 30
+    os_type = "Linux"
+  }
+}
+```
 
 <!-- markdownlint-disable MD033 -->
 ## Requirements
