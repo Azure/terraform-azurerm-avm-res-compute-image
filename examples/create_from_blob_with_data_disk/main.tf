@@ -120,6 +120,9 @@ resource "azapi_resource" "storage_container" {
 resource "azapi_resource" "linux" {
   type = "Microsoft.Compute/virtualMachines@2024-11-01"
   body = {
+    zones = [
+      "1,2,3"
+    ]
     placement = {
       zonePlacementPolicy = "Any"
     }

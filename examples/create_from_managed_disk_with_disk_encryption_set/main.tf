@@ -176,6 +176,9 @@ resource "azurerm_role_assignment" "this" {
 resource "azapi_resource" "linux" {
   type = "Microsoft.Compute/virtualMachines@2024-11-01"
   body = {
+    zones = [
+      "1,2,3"
+    ]
     placement = {
       zonePlacementPolicy = "Any"
     }
