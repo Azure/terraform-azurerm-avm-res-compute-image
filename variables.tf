@@ -1,92 +1,89 @@
+variable "hyperv_generation" {
+  type        = string
+  description = "Specifies which generation of Hyper-V the image should be compatible with: 'V1' or 'V2'."
+  nullable    = false
+
+  validation {
+    condition     = contains(["V1", "V2"], var.hyperv_generation)
+    error_message = "The generation must be either 'V1' or 'V2'."
+  }
+}
+
 variable "location" {
   type        = string
-  description = "Azure region where the resource should be deployed."
+  description = "The Azure location where the image should exist."
   nullable    = false
 }
 
 variable "name" {
   type        = string
-  description = "The name of the this resource."
+  description = "The name of the image."
 
   validation {
-    condition     = can(regex("TODO", var.name))
-    error_message = "The name must be TODO." # TODO remove the example below once complete:
-    #condition     = can(regex("^[a-z0-9]{5,50}$", var.name))
-    #error_message = "The name must be between 5 and 50 characters long and can only contain lowercase letters and numbers."
+    condition     = can(regex("^[a-zA-Z0-9-]{3,80}$", var.name))
+    error_message = "The name must be between 1 and 80 characters long and can only contain letters, numbers, underscores, periods, and dashes."
+  }
+  validation {
+    error_message = "The name must start with a letter or a number"
+    condition     = can(regex("^[a-zA-Z0-9]", var.name))
+  }
+  validation {
+    error_message = "The name must end with a letter or a number or an undescore"
+    condition     = can(regex("[a-zA-Z0-9_]$", var.name))
   }
 }
 
-# This is required for most resource modules
 variable "resource_group_name" {
   type        = string
-  description = "The resource group where the resources will be deployed."
-}
-
-# required AVM interfaces
-# remove only if not supported by the resource
-# tflint-ignore: terraform_unused_declarations
-variable "customer_managed_key" {
-  type = object({
-    key_vault_resource_id = string
-    key_name              = string
-    key_version           = optional(string, null)
-    user_assigned_identity = optional(object({
-      resource_id = string
-    }), null)
-  })
-  default     = null
-  description = <<DESCRIPTION
-A map describing customer-managed keys to associate with the resource. This includes the following properties:
-- `key_vault_resource_id` - The resource ID of the Key Vault where the key is stored.
-- `key_name` - The name of the key.
-- `key_version` - (Optional) The version of the key. If not specified, the latest version is used.
-- `user_assigned_identity` - (Optional) An object representing a user-assigned identity with the following properties:
-  - `resource_id` - The resource ID of the user-assigned identity.
-DESCRIPTION  
-}
-
-variable "diagnostic_settings" {
-  type = map(object({
-    name                                     = optional(string, null)
-    log_categories                           = optional(set(string), [])
-    log_groups                               = optional(set(string), ["allLogs"])
-    metric_categories                        = optional(set(string), ["AllMetrics"])
-    log_analytics_destination_type           = optional(string, "Dedicated")
-    workspace_resource_id                    = optional(string, null)
-    storage_account_resource_id              = optional(string, null)
-    event_hub_authorization_rule_resource_id = optional(string, null)
-    event_hub_name                           = optional(string, null)
-    marketplace_partner_resource_id          = optional(string, null)
-  }))
-  default     = {}
-  description = <<DESCRIPTION
-A map of diagnostic settings to create on the Key Vault. The map key is deliberately arbitrary to avoid issues where map keys maybe unknown at plan time.
-
-- `name` - (Optional) The name of the diagnostic setting. One will be generated if not set, however this will not be unique if you want to create multiple diagnostic setting resources.
-- `log_categories` - (Optional) A set of log categories to send to the log analytics workspace. Defaults to `[]`.
-- `log_groups` - (Optional) A set of log groups to send to the log analytics workspace. Defaults to `["allLogs"]`.
-- `metric_categories` - (Optional) A set of metric categories to send to the log analytics workspace. Defaults to `["AllMetrics"]`.
-- `log_analytics_destination_type` - (Optional) The destination type for the diagnostic setting. Possible values are `Dedicated` and `AzureDiagnostics`. Defaults to `Dedicated`.
-- `workspace_resource_id` - (Optional) The resource ID of the log analytics workspace to send logs and metrics to.
-- `storage_account_resource_id` - (Optional) The resource ID of the storage account to send logs and metrics to.
-- `event_hub_authorization_rule_resource_id` - (Optional) The resource ID of the event hub authorization rule to send logs and metrics to.
-- `event_hub_name` - (Optional) The name of the event hub. If none is specified, the default event hub will be selected.
-- `marketplace_partner_resource_id` - (Optional) The full ARM resource ID of the Marketplace resource to which you would like to send Diagnostic LogsLogs.
-DESCRIPTION  
+  description = "The name of the resource group in which to create the image."
   nullable    = false
+}
+
+variable "data_disks" {
+  type = list(object({
+    storage_type      = string
+    lun               = number
+    blob_uri          = optional(string, null)
+    caching           = optional(string, null)
+    size_gb           = optional(number, null)
+    encryption_set_id = optional(string, null)
+    snapshot_id       = optional(string, null)
+    id                = optional(string, null)
+  }))
+  default     = null
+  description = "(Optional) A list of data disks for the image. Each object represents a disk configuration."
 
   validation {
-    condition     = alltrue([for _, v in var.diagnostic_settings : contains(["Dedicated", "AzureDiagnostics"], v.log_analytics_destination_type)])
-    error_message = "Log analytics destination type must be one of: 'Dedicated', 'AzureDiagnostics'."
+    condition = var.data_disks == null || alltrue([
+      for disk in(var.data_disks != null ? var.data_disks : []) : (
+        disk.blob_uri != null || disk.snapshot_id != null || disk.id != null
+      )
+    ])
+    error_message = "At least one of 'blob_uri', 'snapshot_id', or 'id' must be set if 'data_disks' is provided."
   }
   validation {
-    condition = alltrue(
-      [
-        for _, v in var.diagnostic_settings :
-        v.workspace_resource_id != null || v.storage_account_resource_id != null || v.event_hub_authorization_rule_resource_id != null || v.marketplace_partner_resource_id != null
-      ]
-    )
-    error_message = "At least one of `workspace_resource_id`, `storage_account_resource_id`, `marketplace_partner_resource_id`, or `event_hub_authorization_rule_resource_id`, must be set."
+    condition = var.data_disks == null || alltrue([
+      for disk in(var.data_disks != null ? var.data_disks : []) : (
+        disk.caching == null || contains(["ReadOnly", "None", "ReadWrite"], disk.caching)
+      )
+    ])
+    error_message = "The caching must be one of 'ReadOnly', 'None', or 'ReadWrite' if provided."
+  }
+  validation {
+    condition = var.data_disks == null || alltrue([
+      for disk in(var.data_disks != null ? var.data_disks : []) : (
+        contains(["PremiumV2_LRS", "Premium_LRS", "Premium_ZRS", "StandardSSD_LRS", "StandardSSD_ZRS", "Standard_LRS", "UltraSSD_LRS"], disk.storage_type)
+      )
+    ])
+    error_message = "The storage account type must be one of 'PremiumV2_LRS', 'Premium_LRS', 'Premium_ZRS', 'StandardSSD_LRS', 'StandardSSD_ZRS', 'Standard_LRS', or 'UltraSSD_LRS'."
+  }
+  validation {
+    condition = var.data_disks == null || alltrue([
+      for disk in(var.data_disks != null ? var.data_disks : []) : (
+        disk.size_gb == null || disk.size_gb <= 1023
+      )
+    ])
+    error_message = "The disk size must not be greater than 1023 GB."
   }
 }
 
@@ -95,10 +92,9 @@ variable "enable_telemetry" {
   default     = true
   description = <<DESCRIPTION
 This variable controls whether or not telemetry is enabled for the module.
-For more information see <https://aka.ms/avm/telemetryinfo>.
+For more information see https://aka.ms/avm/telemetryinfo.
 If it is set to false, then no telemetry will be collected.
 DESCRIPTION
-  nullable    = false
 }
 
 variable "lock" {
@@ -116,119 +112,88 @@ DESCRIPTION
 
   validation {
     condition     = var.lock != null ? contains(["CanNotDelete", "ReadOnly"], var.lock.kind) : true
-    error_message = "The lock level must be one of: 'None', 'CanNotDelete', or 'ReadOnly'."
+    error_message = "Lock kind must be either `\"CanNotDelete\"` or `\"ReadOnly\"`."
   }
 }
 
-# tflint-ignore: terraform_unused_declarations
-variable "managed_identities" {
+variable "os_disk" {
   type = object({
-    system_assigned            = optional(bool, false)
-    user_assigned_resource_ids = optional(set(string), [])
+    os_type           = string
+    os_state          = optional(string, "Generalized")
+    storage_type      = optional(string, "Premium_ZRS")
+    blob_uri          = optional(string, null)
+    caching           = optional(string, "None")
+    size_gb           = optional(number, 127)
+    snapshot_id       = optional(string, null)
+    encryption_set_id = optional(string, null)
+    id                = optional(string, null)
   })
-  default     = {}
-  description = <<DESCRIPTION
-Controls the Managed Identity configuration on this resource. The following properties can be specified:
+  default     = null
+  description = "(Optional) A map of os disk for the image. The map key is deliberately arbitrary to avoid issues where map keys maybe unknown at plan time."
 
-- `system_assigned` - (Optional) Specifies if the System Assigned Managed Identity should be enabled.
-- `user_assigned_resource_ids` - (Optional) Specifies a list of User Assigned Managed Identity resource IDs to be assigned to this resource.
-DESCRIPTION
-  nullable    = false
+  validation {
+    condition = (
+      var.os_disk != null ?
+      (
+        var.os_disk.blob_uri != null ||
+        var.os_disk.snapshot_id != null ||
+        var.os_disk.id != null
+      ) : true
+    )
+    error_message = "At least one of 'blob_uri', 'snapshot_id', or 'id' must be set if 'os_disk' is provided."
+  }
+  validation {
+    condition = (
+      var.os_disk != null ?
+      contains(["ReadOnly", "None", "ReadWrite"], var.os_disk.caching) : true
+    )
+    error_message = "The caching must be one of 'ReadOnly', 'None', or 'ReadWrite' if provided."
+  }
+  validation {
+    condition = (
+      var.os_disk != null ?
+      contains(["PremiumV2_LRS", "Premium_LRS", "Premium_ZRS", "StandardSSD_LRS", "StandardSSD_ZRS", "Standard_LRS"], var.os_disk.storage_type) : true
+    )
+    error_message = "The storage type must be one of 'PremiumV2_LRS', 'Premium_LRS', 'Premium_ZRS', 'StandardSSD_LRS', 'StandardSSD_ZRS', or 'Standard_LRS'."
+  }
+  validation {
+    condition = (
+      var.os_disk != null ?
+      contains(["Specialized", "Generalized"], var.os_disk.os_state) : true
+    )
+    error_message = "The state must be either 'Specialized' or 'Generalized'."
+  }
+  validation {
+    condition = (
+      var.os_disk != null ?
+      var.os_disk.size_gb <= 1023 : true
+    )
+    error_message = "The disk size must not be greater than 1023 GB."
+  }
+  validation {
+    condition = (
+      var.os_disk != null ?
+      contains(["Windows", "Linux"], var.os_disk.os_type) : true
+    )
+    error_message = " The type of the OS that is included in the disk if creating a VM from a custom image must be 'Windows' or 'Linux'."
+  }
 }
 
-variable "private_endpoints" {
-  type = map(object({
-    name = optional(string, null)
-    role_assignments = optional(map(object({
-      role_definition_id_or_name             = string
-      principal_id                           = string
-      description                            = optional(string, null)
-      skip_service_principal_aad_check       = optional(bool, false)
-      condition                              = optional(string, null)
-      condition_version                      = optional(string, null)
-      delegated_managed_identity_resource_id = optional(string, null)
-    })), {})
-    lock = optional(object({
-      kind = string
-      name = optional(string, null)
-    }), null)
-    tags                                    = optional(map(string), null)
-    subnet_resource_id                      = string
-    private_dns_zone_group_name             = optional(string, "default")
-    private_dns_zone_resource_ids           = optional(set(string), [])
-    application_security_group_associations = optional(map(string), {})
-    private_service_connection_name         = optional(string, null)
-    network_interface_name                  = optional(string, null)
-    location                                = optional(string, null)
-    resource_group_name                     = optional(string, null)
-    ip_configurations = optional(map(object({
-      name               = string
-      private_ip_address = string
-    })), {})
-  }))
-  default     = {}
-  description = <<DESCRIPTION
-A map of private endpoints to create on this resource. The map key is deliberately arbitrary to avoid issues where map keys maybe unknown at plan time.
-
-- `name` - (Optional) The name of the private endpoint. One will be generated if not set.
-- `role_assignments` - (Optional) A map of role assignments to create on the private endpoint. The map key is deliberately arbitrary to avoid issues where map keys maybe unknown at plan time. See `var.role_assignments` for more information.
-- `lock` - (Optional) The lock level to apply to the private endpoint. Default is `None`. Possible values are `None`, `CanNotDelete`, and `ReadOnly`.
-- `tags` - (Optional) A mapping of tags to assign to the private endpoint.
-- `subnet_resource_id` - The resource ID of the subnet to deploy the private endpoint in.
-- `private_dns_zone_group_name` - (Optional) The name of the private DNS zone group. One will be generated if not set.
-- `private_dns_zone_resource_ids` - (Optional) A set of resource IDs of private DNS zones to associate with the private endpoint. If not set, no zone groups will be created and the private endpoint will not be associated with any private DNS zones. DNS records must be managed external to this module.
-- `application_security_group_resource_ids` - (Optional) A map of resource IDs of application security groups to associate with the private endpoint. The map key is deliberately arbitrary to avoid issues where map keys maybe unknown at plan time.
-- `private_service_connection_name` - (Optional) The name of the private service connection. One will be generated if not set.
-- `network_interface_name` - (Optional) The name of the network interface. One will be generated if not set.
-- `location` - (Optional) The Azure location where the resources will be deployed. Defaults to the location of the resource group.
-- `resource_group_name` - (Optional) The resource group where the resources will be deployed. Defaults to the resource group of this resource.
-- `ip_configurations` - (Optional) A map of IP configurations to create on the private endpoint. If not specified the platform will create one. The map key is deliberately arbitrary to avoid issues where map keys maybe unknown at plan time.
-  - `name` - The name of the IP configuration.
-  - `private_ip_address` - The private IP address of the IP configuration.
-DESCRIPTION
-  nullable    = false
+variable "source_virtual_machine_id" {
+  type        = string
+  default     = null
+  description = "(Optional) The Id of the source virtual machine from which the image is created."
 }
 
-# This variable is used to determine if the private_dns_zone_group block should be included,
-# or if it is to be managed externally, e.g. using Azure Policy.
-# https://github.com/Azure/terraform-azurerm-avm-res-keyvault-vault/issues/32
-# Alternatively you can use AzAPI, which does not have this issue.
-variable "private_endpoints_manage_dns_zone_group" {
-  type        = bool
-  default     = true
-  description = "Whether to manage private DNS zone groups with this module. If set to false, you must manage private DNS zone groups externally, e.g. using Azure Policy."
-  nullable    = false
-}
-
-variable "role_assignments" {
-  type = map(object({
-    role_definition_id_or_name             = string
-    principal_id                           = string
-    description                            = optional(string, null)
-    skip_service_principal_aad_check       = optional(bool, false)
-    condition                              = optional(string, null)
-    condition_version                      = optional(string, null)
-    delegated_managed_identity_resource_id = optional(string, null)
-  }))
-  default     = {}
-  description = <<DESCRIPTION
-A map of role assignments to create on this resource. The map key is deliberately arbitrary to avoid issues where map keys maybe unknown at plan time.
-
-- `role_definition_id_or_name` - The ID or name of the role definition to assign to the principal.
-- `principal_id` - The ID of the principal to assign the role to.
-- `description` - The description of the role assignment.
-- `skip_service_principal_aad_check` - If set to true, skips the Azure Active Directory check for the service principal in the tenant. Defaults to false.
-- `condition` - The condition which will be used to scope the role assignment.
-- `condition_version` - The version of the condition syntax. Valid values are '2.0'.
-
-> Note: only set `skip_service_principal_aad_check` to true if you are assigning a role to a service principal.
-DESCRIPTION
-  nullable    = false
-}
-
-# tflint-ignore: terraform_unused_declarations
 variable "tags" {
   type        = map(string)
   default     = null
-  description = "(Optional) Tags of the resource."
+  description = "Map of tags to assign to the image."
+}
+
+variable "zone_resilient" {
+  type        = bool
+  default     = true
+  description = "Specifies whether the image is zone resilient or not. Zone resilient images can be created only in regions that provide Zone Redundant Storage (ZRS)."
+  nullable    = false
 }
