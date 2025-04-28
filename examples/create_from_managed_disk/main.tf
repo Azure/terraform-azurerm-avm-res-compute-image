@@ -108,7 +108,7 @@ resource "azapi_resource" "linux" {
           createOption = "FromImage"
           diskSizeGB   = 30
           managedDisk = {
-            storageAccountType = "Standard_GZRS"
+            storageAccountType = "Premium_ZRS"
           }
         }
       }
