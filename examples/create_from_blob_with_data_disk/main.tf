@@ -89,7 +89,7 @@ resource "azapi_resource" "storage_account" {
   type = "Microsoft.Storage/storageAccounts@2023-05-01"
   body = {
     sku = {
-      name = "Standard_GZRS"
+      name = "Premium_ZRS"
     }
     kind     = "StorageV2"
     location = azurerm_resource_group.this.location
