@@ -99,7 +99,7 @@ resource "azapi_resource" "storage_account" {
   type = "Microsoft.Storage/storageAccounts@2023-05-01"
   body = {
     sku = {
-      name = "Standard_LRS"
+      name = "Standard_GZRS"
     }
     kind     = "StorageV2"
     location = azurerm_resource_group.this.location
@@ -128,8 +128,11 @@ resource "azapi_resource" "storage_container" {
 
 # Windows virtual machine with unmanaged disks for sake of demo
 resource "azapi_resource" "linux" {
-  type = "Microsoft.Compute/virtualMachines@2024-07-01"
+  type = "Microsoft.Compute/virtualMachines@2024-11-01"
   body = {
+    placement = {
+      zonePlacementPolicy = "Any"
+    }
     properties = {
       hardwareProfile = {
         vmSize = "Standard_D2s_v3"

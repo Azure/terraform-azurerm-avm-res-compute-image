@@ -92,8 +92,11 @@ resource "azurerm_network_interface" "this" {
 }
 
 resource "azapi_resource" "linux" {
-  type = "Microsoft.Compute/virtualMachines@2024-07-01"
+  type = "Microsoft.Compute/virtualMachines@2024-11-01"
   body = {
+    placement = {
+      zonePlacementPolicy = "Any"
+    }
     properties = {
       hardwareProfile = {
         vmSize = "Standard_D2s_v3"
@@ -111,7 +114,7 @@ resource "azapi_resource" "linux" {
           createOption = "FromImage"
           diskSizeGB   = 30
           managedDisk = {
-            storageAccountType = "Premium_ZRS"
+            storageAccountType = "Standard_GZRS"
           }
         }
         dataDisks = [

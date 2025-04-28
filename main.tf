@@ -20,19 +20,20 @@ resource "azurerm_image" "this" {
     for_each = var.data_disks != null ? var.data_disks : []
 
     content {
+      storage_type           = data_disk.value.storage_type
       blob_uri               = data_disk.value.blob_uri
       caching                = data_disk.value.caching
       disk_encryption_set_id = data_disk.value.encryption_set_id
       lun                    = data_disk.value.lun
       managed_disk_id        = data_disk.value.id
       size_gb                = data_disk.value.size_gb
-      storage_type           = data_disk.value.storage_type
     }
   }
   dynamic "os_disk" {
     for_each = var.os_disk != null ? [var.os_disk] : []
 
     content {
+      storage_type           = var.os_disk.storage_type
       blob_uri               = var.os_disk.blob_uri
       caching                = var.os_disk.caching
       disk_encryption_set_id = var.os_disk.encryption_set_id
@@ -40,7 +41,6 @@ resource "azurerm_image" "this" {
       os_state               = var.os_disk.os_state
       os_type                = var.os_disk.os_type
       size_gb                = var.os_disk.size_gb
-      storage_type           = var.os_disk.storage_type
     }
   }
 }
